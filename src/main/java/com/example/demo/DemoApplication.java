@@ -6,12 +6,18 @@ import net.bytebuddy.ClassFileVersion;
 import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.dynamic.scaffold.InstrumentedTypeFactory;
 import net.bytebuddy.dynamic.scaffold.TypeInitializer;
 import net.bytebuddy.implementation.Implementation;
 import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
+import net.bytebuddy.jar.asm.ClassReader;
+import net.bytebuddy.jar.asm.ClassVisitor;
+import net.bytebuddy.jar.asm.ClassWriter;
+import net.bytebuddy.jar.asm.Opcodes;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.RandomString;
 import org.springframework.boot.SpringApplication;
@@ -127,7 +133,7 @@ public class DemoApplication {
                                     new ImplementationContextFactory(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion));
                         }
                     })
-                    //.with(new InstrumentedTypeFactory())
+                    .with(new InstrumentedTypeFactory())
                     ;
 
 
@@ -140,6 +146,32 @@ public class DemoApplication {
                                         .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
                                                 .to(new InstMethodsInter(null, classLoader), "delegate$" + RandomString.hashOf(InstMethodsInter.class.hashCode())));
+                            }
+                    )
+                    .with(
+                            new AgentBuilder.TransformerDecorator() {
+                                public ResettableClassFileTransformer decorate(ResettableClassFileTransformer classFileTransformer) {
+                                    return new ResettableClassFileTransformer.WithDelegation(classFileTransformer) {
+                                        @Override
+                                        public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
+                                            //transform class
+                                            byte[] newClassfileBuffer = classFileTransformer.transform(loader, className, classBeingRedefined, protectionDomain, classfileBuffer);
+                                            if (newClassfileBuffer != null) {
+                                                classfileBuffer = newClassfileBuffer;
+                                            }
+                                            if (!className.startsWith("com/example")) {
+                                                return classfileBuffer;
+                                            }
+                                            // remove duplicated fields
+                                            ClassReader classReader = new ClassReader(classfileBuffer);
+                                            ClassWriter classWriter = new ClassWriter(classReader, 0);
+                                            ClassVisitor classVisitor = new RemoveDuplicatedFieldsClassVisitor(Opcodes.ASM8, classWriter);
+                                            classReader.accept(classVisitor, 0);
+                                            classfileBuffer = classWriter.toByteArray();
+                                            return classfileBuffer;
+                                        }
+                                    };
+                                }
                             }
                     )
                     .installOn(ByteBuddyAgent.install());
