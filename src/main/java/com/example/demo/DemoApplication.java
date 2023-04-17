@@ -6,7 +6,10 @@ import net.bytebuddy.ClassFileVersion;
 import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
-import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
+import net.bytebuddy.asm.AsmVisitorWrapper;
+import net.bytebuddy.description.field.FieldDescription;
+import net.bytebuddy.description.field.FieldList;
+import net.bytebuddy.description.method.MethodList;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.dynamic.scaffold.InstrumentedTypeFactory;
 import net.bytebuddy.dynamic.scaffold.TypeInitializer;
@@ -14,11 +17,10 @@ import net.bytebuddy.implementation.Implementation;
 import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
-import net.bytebuddy.jar.asm.ClassReader;
 import net.bytebuddy.jar.asm.ClassVisitor;
-import net.bytebuddy.jar.asm.ClassWriter;
 import net.bytebuddy.jar.asm.Opcodes;
 import net.bytebuddy.matcher.ElementMatchers;
+import net.bytebuddy.pool.TypePool;
 import net.bytebuddy.utility.RandomString;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -143,37 +145,52 @@ public class DemoApplication {
                     .type(ElementMatchers.named("com.example.demo.test.Foo"))
                     .transform((builder, typeDescription, classLoader, module) -> {
                                 return builder
+                                        .visit(new AsmVisitorWrapper() {
+                                            @Override
+                                            public int mergeWriter(int flags) {
+                                                return flags;
+                                            }
+
+                                            @Override
+                                            public int mergeReader(int flags) {
+                                                return flags;
+                                            }
+
+                                            @Override
+                                            public ClassVisitor wrap(TypeDescription instrumentedType, ClassVisitor classVisitor, Implementation.Context implementationContext, TypePool typePool, FieldList<FieldDescription.InDefinedShape> fields, MethodList<?> methods, int writerFlags, int readerFlags) {
+                                                return new RemoveDuplicatedFieldsClassVisitor(Opcodes.ASM8, classVisitor);
+                                            }
+                                        })
                                         .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
                                                 .to(new InstMethodsInter(null, classLoader), "delegate$" + RandomString.hashOf(InstMethodsInter.class.hashCode())));
                             }
                     )
-                    .with(
-                            new AgentBuilder.TransformerDecorator() {
-                                public ResettableClassFileTransformer decorate(ResettableClassFileTransformer classFileTransformer) {
-                                    return new ResettableClassFileTransformer.WithDelegation(classFileTransformer) {
-                                        @Override
-                                        public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
-                                            //transform class
-                                            byte[] newClassfileBuffer = classFileTransformer.transform(loader, className, classBeingRedefined, protectionDomain, classfileBuffer);
-                                            if (newClassfileBuffer != null) {
-                                                classfileBuffer = newClassfileBuffer;
-                                            }
-                                            if (!className.startsWith("com/example")) {
-                                                return classfileBuffer;
-                                            }
-                                            // remove duplicated fields
-                                            ClassReader classReader = new ClassReader(classfileBuffer);
-                                            ClassWriter classWriter = new ClassWriter(classReader, 0);
-                                            ClassVisitor classVisitor = new RemoveDuplicatedFieldsClassVisitor(Opcodes.ASM8, classWriter);
-                                            classReader.accept(classVisitor, 0);
-                                            classfileBuffer = classWriter.toByteArray();
-                                            return classfileBuffer;
-                                        }
-                                    };
-                                }
-                            }
-                    )
+//                    .with(new AgentBuilder.TransformerDecorator() {
+//                                public ResettableClassFileTransformer decorate(ResettableClassFileTransformer classFileTransformer) {
+//                                    return new ResettableClassFileTransformer.WithDelegation(classFileTransformer) {
+//                                        @Override
+//                                        public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
+//                                            //transform class
+//                                            byte[] newClassfileBuffer = classFileTransformer.transform(loader, className, classBeingRedefined, protectionDomain, classfileBuffer);
+//                                            if (newClassfileBuffer != null) {
+//                                                classfileBuffer = newClassfileBuffer;
+//                                            }
+//                                            if (!className.startsWith("com/example")) {
+//                                                return classfileBuffer;
+//                                            }
+//                                            // remove duplicated fields
+//                                            ClassReader classReader = new ClassReader(classfileBuffer);
+//                                            ClassWriter classWriter = new ClassWriter(classReader, 0);
+//                                            ClassVisitor classVisitor = new RemoveDuplicatedFieldsClassVisitor(Opcodes.ASM8, classWriter);
+//                                            classReader.accept(classVisitor, 0);
+//                                            classfileBuffer = classWriter.toByteArray();
+//                                            return classfileBuffer;
+//                                        }
+//                                    };
+//                                }
+//                            }
+//                    )
                     .installOn(ByteBuddyAgent.install());
 
             String result = new Foo()
