@@ -23,9 +23,8 @@ public class InstMethodsInter {
                             @Origin Method method) throws Throwable {
 
         Object originResult = zuper.call();
-        Object newResult = originResult + "-new";
-        System.out.printf("intercept: obj: %s, allArguments: %s, super: %s, method: %s, originResult: %s, newResult: %s\n",
-                obj, Arrays.asList(allArguments), zuper, method, originResult, newResult);
-        return newResult;
+        System.out.printf("intercept: obj: %s, allArguments: %s, super: %s, method: %s, originResult: %s\n",
+                obj, Arrays.asList(allArguments), zuper, method, originResult);
+        return originResult;
     }
 }

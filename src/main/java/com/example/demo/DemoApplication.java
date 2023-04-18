@@ -6,10 +6,6 @@ import net.bytebuddy.ClassFileVersion;
 import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
-import net.bytebuddy.asm.AsmVisitorWrapper;
-import net.bytebuddy.description.field.FieldDescription;
-import net.bytebuddy.description.field.FieldList;
-import net.bytebuddy.description.method.MethodList;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.dynamic.scaffold.InstrumentedTypeFactory;
 import net.bytebuddy.dynamic.scaffold.TypeInitializer;
@@ -17,10 +13,8 @@ import net.bytebuddy.implementation.Implementation;
 import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
-import net.bytebuddy.jar.asm.ClassVisitor;
-import net.bytebuddy.jar.asm.Opcodes;
 import net.bytebuddy.matcher.ElementMatchers;
-import net.bytebuddy.pool.TypePool;
+import net.bytebuddy.utility.JavaModule;
 import net.bytebuddy.utility.RandomString;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -94,7 +88,6 @@ public class DemoApplication {
     }
 
     private static void transformWithByteBuddy() {
-        try {
             // 1. delegate to static method
 //            new AgentBuilder.Default()
 //                    .type(ElementMatchers.named("com.example.demo.test.Foo"))
@@ -116,12 +109,13 @@ public class DemoApplication {
             // 3. interceptor
             Map<TypeDescription, ImplementationContextFactory> implementationContextFactoryCache = new ConcurrentHashMap<>();
             ByteBuddy byteBuddy = new ByteBuddy()
-                    .with(new AuxiliaryType.NamingStrategy() {
-                        @Override
-                        public String name(TypeDescription instrumentedType) {
-                            return instrumentedType.getName() + "$auxiliary$" + RandomString.hashOf(instrumentedType.getCanonicalName().hashCode());
-                        }
-                    })
+//                    .with(new AuxiliaryType.NamingStrategy() {
+//                        @Override
+//                        public String name(TypeDescription instrumentedType) {
+//                            return instrumentedType.getName() + "$auxiliary$" + RandomString.hashOf(instrumentedType.getCanonicalName().hashCode());
+//                        }
+//                    })
+                    .with(new AuxiliaryType.NamingStrategy.Enumerating("auxiliary"))
                     .with(new NamingStrategy.AbstractBase() {
                         @Override
                         protected String name(TypeDescription superClass) {
@@ -132,7 +126,13 @@ public class DemoApplication {
                         @Override
                         public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion) {
                             return implementationContextFactoryCache.computeIfAbsent(instrumentedType, key ->
-                                    new ImplementationContextFactory(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion));
+                                    new ImplementationContextFactory(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion, Implementation.Context.FrameGeneration.DISABLED, RandomString.hashOf(instrumentedType.hashCode())));
+                        }
+
+                        @Override
+                        public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion, Implementation.Context.FrameGeneration frameGeneration) {
+                            return implementationContextFactoryCache.computeIfAbsent(instrumentedType, key ->
+                                    new ImplementationContextFactory(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion, frameGeneration, RandomString.hashOf(instrumentedType.hashCode())));
                         }
                     })
                     .with(new InstrumentedTypeFactory())
@@ -143,29 +143,29 @@ public class DemoApplication {
                     .enableNativeMethodPrefix("_origin$")
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                     .type(ElementMatchers.named("com.example.demo.test.Foo"))
-                    .transform((builder, typeDescription, classLoader, module) -> {
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
                                 return builder
-                                        .visit(new AsmVisitorWrapper() {
-                                            @Override
-                                            public int mergeWriter(int flags) {
-                                                return flags;
-                                            }
-
-                                            @Override
-                                            public int mergeReader(int flags) {
-                                                return flags;
-                                            }
-
-                                            @Override
-                                            public ClassVisitor wrap(TypeDescription instrumentedType, ClassVisitor classVisitor, Implementation.Context implementationContext, TypePool typePool, FieldList<FieldDescription.InDefinedShape> fields, MethodList<?> methods, int writerFlags, int readerFlags) {
-                                                return new RemoveDuplicatedFieldsClassVisitor(Opcodes.ASM8, classVisitor);
-                                            }
-                                        })
+                                        .visit(new MyAsmVisitorWrapper())
                                         .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
-                                                .to(new InstMethodsInter(null, classLoader), "delegate$" + RandomString.hashOf(InstMethodsInter.class.hashCode())));
+                                                .to(new InstMethodsInter(null, classLoader), "delegate$sayHelloFoo"));
                             }
                     )
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
+                                return builder
+                                        .visit(new MyAsmVisitorWrapper())
+                                        .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
+                                        .intercept(MethodDelegation.withDefaultConfiguration()
+                                                .to(new InstMethodsInter(null, classLoader), "delegate$doSomething"));
+                            }
+                    )
+                    .with(new AgentBuilder.Listener.Adapter() {
+                        @Override
+                        public void onError(String typeName, ClassLoader classLoader, JavaModule module, boolean loaded, Throwable throwable) {
+                            System.err.println(String.format("Transform Error: typeName: %s, classLoader: %s, module: %s, loaded: %s", typeName, classLoader, module, loaded));
+                            throwable.printStackTrace();
+                        }
+                    })
 //                    .with(new AgentBuilder.TransformerDecorator() {
 //                                public ResettableClassFileTransformer decorate(ResettableClassFileTransformer classFileTransformer) {
 //                                    return new ResettableClassFileTransformer.WithDelegation(classFileTransformer) {
@@ -193,12 +193,11 @@ public class DemoApplication {
 //                    )
                     .installOn(ByteBuddyAgent.install());
 
-            String result = new Foo()
-                    .sayHelloFoo();
+            String result = new Foo().sayHelloFoo();
             System.out.println("sayHello result: " + result);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+
+            List<String> list = new Foo().doSomething(123);
+            System.out.println("doSomething result: " + list);
     }
 
     private static void reTransform(Instrumentation instrumentation, Class clazz) throws UnmodifiableClassException {

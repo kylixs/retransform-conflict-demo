@@ -5,6 +5,7 @@ import net.bytebuddy.description.field.FieldDescription;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.RecordComponentDescription;
 import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.description.type.TypeList;
 import net.bytebuddy.description.type.TypeVariableToken;
 import net.bytebuddy.dynamic.TargetType;
 import net.bytebuddy.implementation.LoadedTypeInitializer;
@@ -26,6 +27,7 @@ public class InstrumentedTypeFactory implements InstrumentedType.Factory {
                 typeDescription.getTypeVariables().asTokenList(is(typeDescription)),
                 typeDescription.getInterfaces().accept(TypeDescription.Generic.Visitor.Substitutor.ForDetachment.of(typeDescription)),
                 typeDescription.getDeclaredFields().asTokenList(is(typeDescription)),
+                Collections.<String, Object>emptyMap(),
                 typeDescription.getDeclaredMethods().asTokenList(is(typeDescription)),
                 typeDescription.getRecordComponents().asTokenList(is(typeDescription)),
                 typeDescription.getDeclaredAnnotations(),
@@ -35,6 +37,9 @@ public class InstrumentedTypeFactory implements InstrumentedType.Factory {
                 typeDescription.getEnclosingMethod(),
                 typeDescription.getEnclosingType(),
                 typeDescription.getDeclaredTypes(),
+                typeDescription.isSealed()
+                        ? typeDescription.getPermittedSubtypes()
+                        : TypeList.UNDEFINED,
                 typeDescription.isAnonymousType(),
                 typeDescription.isLocalType(),
                 typeDescription.isRecord(),
@@ -54,6 +59,7 @@ public class InstrumentedTypeFactory implements InstrumentedType.Factory {
                 Collections.<TypeVariableToken>emptyList(),
                 Collections.<TypeDescription.Generic>emptyList(),
                 Collections.<FieldDescription.Token>emptyList(),
+                Collections.<String, Object>emptyMap(),
                 Collections.<MethodDescription.Token>emptyList(),
                 Collections.<RecordComponentDescription.Token>emptyList(),
                 Collections.<AnnotationDescription>emptyList(),
@@ -63,6 +69,7 @@ public class InstrumentedTypeFactory implements InstrumentedType.Factory {
                 MethodDescription.UNDEFINED,
                 TypeDescription.UNDEFINED,
                 Collections.<TypeDescription>emptyList(),
+                TypeList.UNDEFINED,
                 false,
                 false,
                 false,

@@ -23,15 +23,10 @@ import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.utility.CompoundList;
 import net.bytebuddy.utility.JavaType;
+import net.bytebuddy.utility.nullability.MaybeNull;
 
 import java.lang.annotation.ElementType;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 /**
  * copy from net.bytebuddy.dynamic.scaffold.InstrumentedType.Default
@@ -63,6 +58,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * The generic super type of the instrumented type.
      */
+    @MaybeNull
     private final Generic superClass;
 
     /**
@@ -79,6 +75,11 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
      * A list of field tokens describing the fields of the instrumented type.
      */
     private final List<? extends FieldDescription.Token> fieldTokens;
+
+    /**
+     * A mapping of auxiliary field names to their mapped values.
+     */
+    private final Map<String, Object> auxiliaryFields;
 
     /**
      * A list of method tokens describing the methods of the instrumented type.
@@ -108,16 +109,19 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * The declaring type of the instrumented type or {@code null} if no such type exists.
      */
+    @MaybeNull
     private final TypeDescription declaringType;
 
     /**
      * The enclosing method of the instrumented type or {@code null} if no such type exists.
      */
+    @MaybeNull
     private final MethodDescription.InDefinedShape enclosingMethod;
 
     /**
      * The enclosing type of the instrumented type or {@code null} if no such type exists.
      */
+    @MaybeNull
     private final TypeDescription enclosingType;
 
     /**
@@ -126,7 +130,13 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     private final List<? extends TypeDescription> declaredTypes;
 
     /**
-     * {@code true} if this type is a anonymous class.
+     * A list of permitted subclasses or {@code null} if this type is not sealed.
+     */
+    @MaybeNull
+    private final List<? extends TypeDescription> permittedSubclasses;
+
+    /**
+     * {@code true} if this type is an anonymous class.
      */
     private final boolean anonymousClass;
 
@@ -159,6 +169,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
      * @param superClass             The generic super type of the instrumented type.
      * @param interfaceTypes         A list of interfaces of the instrumented type.
      * @param fieldTokens            A list of field tokens describing the fields of the instrumented type.
+     * @param auxiliaryFieldValues   A mapping of auxiliary field names to their mapped values.
      * @param methodTokens           A list of method tokens describing the methods of the instrumented type.
      * @param recordComponentTokens  A list of record component tokens describing the record components of the instrumented type.
      * @param annotationDescriptions A list of annotations of the annotated type.
@@ -168,7 +179,8 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
      * @param enclosingMethod        The enclosing method of the instrumented type or {@code null} if no such type exists.
      * @param enclosingType          The enclosing type of the instrumented type or {@code null} if no such type exists.
      * @param declaredTypes          A list of types that are declared by this type.
-     * @param anonymousClass         {@code true} if this type is a anonymous class.
+     * @param permittedSubclasses    A list of permitted subclasses or {@code null} if this type is not sealed.
+     * @param anonymousClass         {@code true} if this type is an anonymous class.
      * @param localClass             {@code true} if this type is a local class.
      * @param record                 {@code true} if this type is a record class.
      * @param nestHost               The nest host of this instrumented type or a description of {@link TargetType} if this type is its own nest host.
@@ -176,19 +188,21 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
      */
     protected InstrumentedTypeDefault(String name,
                       int modifiers,
-                      Generic superClass,
+                      @MaybeNull Generic superClass,
                       List<? extends TypeVariableToken> typeVariables,
                       List<? extends Generic> interfaceTypes,
                       List<? extends FieldDescription.Token> fieldTokens,
+                      Map<String, Object> auxiliaryFieldValues,
                       List<? extends MethodDescription.Token> methodTokens,
                       List<? extends RecordComponentDescription.Token> recordComponentTokens,
                       List<? extends AnnotationDescription> annotationDescriptions,
                       TypeInitializer typeInitializer,
                       LoadedTypeInitializer loadedTypeInitializer,
-                      TypeDescription declaringType,
-                      MethodDescription.InDefinedShape enclosingMethod,
-                      TypeDescription enclosingType,
+                      @MaybeNull TypeDescription declaringType,
+                      @MaybeNull MethodDescription.InDefinedShape enclosingMethod,
+                      @MaybeNull TypeDescription enclosingType,
                       List<? extends TypeDescription> declaredTypes,
+                      @MaybeNull List<? extends TypeDescription> permittedSubclasses,
                       boolean anonymousClass,
                       boolean localClass,
                       boolean record,
@@ -200,6 +214,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
         this.superClass = superClass;
         this.interfaceTypes = interfaceTypes;
         this.fieldTokens = fieldTokens;
+        this.auxiliaryFields = auxiliaryFieldValues;
         this.methodTokens = methodTokens;
         this.recordComponentTokens = recordComponentTokens;
         this.annotationDescriptions = annotationDescriptions;
@@ -209,6 +224,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
         this.enclosingMethod = enclosingMethod;
         this.enclosingType = enclosingType;
         this.declaredTypes = declaredTypes;
+        this.permittedSubclasses = permittedSubclasses;
         this.anonymousClass = anonymousClass;
         this.localClass = localClass;
         this.record = record;
@@ -250,6 +266,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -259,6 +276,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -275,12 +293,13 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
         if (optional.isPresent()) {
             return this;
         }
-        return new InstrumentedTypeDefault(this.name,
+        return new InstrumentedTypeDefault(name,
                 modifiers,
                 superClass,
                 typeVariables,
                 interfaceTypes,
                 CompoundList.of(fieldTokens, token.accept(Generic.Visitor.Substitutor.ForDetachment.of(this))),
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -290,6 +309,52 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
+                anonymousClass,
+                localClass,
+                record,
+                nestHost,
+                nestMembers);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public WithFlexibleName withAuxiliaryField(FieldDescription.Token token, Object value) {
+        // TODO ignore duplicated fields
+        Optional<FieldDescription.InDefinedShape> optional = this.getDeclaredFields().stream().filter(f -> f.getName().equals(token.getName())).findAny();
+        if (optional.isPresent()) {
+            return this;
+        }
+        Map<String, Object> auxiliaryFields = new HashMap<String, Object>(this.auxiliaryFields);
+        Object previous = auxiliaryFields.put(token.getName(), value);
+        if (previous != null) {
+            if (previous == value) {
+                return this;
+            } else {
+                throw new IllegalStateException("Field " + token.getName()
+                        + " for " + this
+                        + " already mapped to " + previous
+                        + " and not " + value);
+            }
+        }
+        return new InstrumentedTypeDefault(name,
+                modifiers,
+                superClass,
+                typeVariables,
+                interfaceTypes,
+                CompoundList.of(fieldTokens, token.accept(Generic.Visitor.Substitutor.ForDetachment.of(this))),
+                auxiliaryFields,
+                methodTokens,
+                recordComponentTokens,
+                annotationDescriptions,
+                typeInitializer,
+                new LoadedTypeInitializer.Compound(loadedTypeInitializer, new LoadedTypeInitializer.ForStaticField(token.getName(), value)),
+                declaringType,
+                enclosingMethod,
+                enclosingType,
+                declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -307,6 +372,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 CompoundList.of(methodTokens, token.accept(Generic.Visitor.Substitutor.ForDetachment.of(this))),
                 recordComponentTokens,
                 annotationDescriptions,
@@ -316,6 +382,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -333,6 +400,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 CompoundList.of(recordComponentTokens, token.accept(Generic.Visitor.Substitutor.ForDetachment.of(this))),
                 annotationDescriptions,
@@ -342,6 +410,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 true,
@@ -359,6 +428,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 CompoundList.of(this.interfaceTypes, interfaceTypes.accept(Generic.Visitor.Substitutor.ForDetachment.of(this))),
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -368,6 +438,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -385,6 +456,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 CompoundList.of(this.annotationDescriptions, annotationDescriptions),
@@ -394,6 +466,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -411,6 +484,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -420,6 +494,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -439,6 +514,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -448,6 +524,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -458,13 +535,14 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
-    public WithFlexibleName withEnclosingType(TypeDescription enclosingType) {
+    public WithFlexibleName withEnclosingType(@MaybeNull TypeDescription enclosingType) {
         return new InstrumentedTypeDefault(name,
                 modifiers,
                 superClass,
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -474,6 +552,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 MethodDescription.UNDEFINED,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -491,6 +570,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -500,6 +580,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingMethod.getDeclaringType(),
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -510,13 +591,14 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
-    public WithFlexibleName withDeclaringType(TypeDescription declaringType) {
+    public WithFlexibleName withDeclaringType(@MaybeNull TypeDescription declaringType) {
         return new InstrumentedTypeDefault(name,
                 modifiers,
                 superClass,
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -526,6 +608,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -543,6 +626,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -552,6 +636,37 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 CompoundList.of(this.declaredTypes, declaredTypes),
+                permittedSubclasses,
+                anonymousClass,
+                localClass,
+                record,
+                nestHost,
+                nestMembers);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public WithFlexibleName withPermittedSubclasses(@MaybeNull TypeList permittedSubclasses) {
+        return new InstrumentedTypeDefault(name,
+                modifiers,
+                superClass,
+                typeVariables,
+                interfaceTypes,
+                fieldTokens,
+                auxiliaryFields,
+                methodTokens,
+                recordComponentTokens,
+                annotationDescriptions,
+                typeInitializer,
+                loadedTypeInitializer,
+                declaringType,
+                enclosingMethod,
+                enclosingType,
+                declaredTypes,
+                permittedSubclasses == null || this.permittedSubclasses == null
+                        ? permittedSubclasses
+                        : CompoundList.of(this.permittedSubclasses, permittedSubclasses),
                 anonymousClass,
                 localClass,
                 record,
@@ -569,6 +684,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 CompoundList.of(typeVariables, typeVariable.accept(Generic.Visitor.Substitutor.ForDetachment.of(this))),
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -578,6 +694,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -595,6 +712,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -604,6 +722,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -628,6 +747,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -637,6 +757,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -654,6 +775,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -663,6 +785,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 false,
                 localClass,
                 record,
@@ -680,6 +803,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -689,6 +813,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 false,
                 record,
@@ -706,6 +831,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 record
                         ? recordComponentTokens
@@ -717,6 +843,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -734,6 +861,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -743,6 +871,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -760,6 +889,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 typeVariables,
                 interfaceTypes,
                 fieldTokens,
+                auxiliaryFields,
                 methodTokens,
                 recordComponentTokens,
                 annotationDescriptions,
@@ -769,6 +899,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 enclosingMethod,
                 enclosingType,
                 declaredTypes,
+                permittedSubclasses,
                 anonymousClass,
                 localClass,
                 record,
@@ -793,6 +924,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
+    @MaybeNull
     public MethodDescription.InDefinedShape getEnclosingMethod() {
         return enclosingMethod;
     }
@@ -800,6 +932,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
+    @MaybeNull
     public TypeDescription getEnclosingType() {
         return enclosingType;
     }
@@ -828,11 +961,12 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
+    @MaybeNull
     public PackageDescription getPackage() {
         int packageIndex = name.lastIndexOf('.');
-        return new PackageDescription.Simple(packageIndex == -1
-                ? EMPTY_NAME
-                : name.substring(0, packageIndex));
+        return packageIndex == -1
+                ? PackageDescription.DEFAULT
+                : new PackageDescription.Simple(name.substring(0, packageIndex));
     }
 
     /**
@@ -845,6 +979,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
+    @MaybeNull
     public TypeDescription getDeclaringType() {
         return declaringType;
     }
@@ -852,7 +987,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
-    @CachedReturnPlugin.Enhance
+    @MaybeNull
     public Generic getSuperClass() {
         return superClass == null
                 ? Generic.UNDEFINED
@@ -862,7 +997,6 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
-    @CachedReturnPlugin.Enhance
     public TypeList.Generic getInterfaces() {
         return new TypeList.Generic.ForDetachedTypes.WithResolvedErasure(interfaceTypes, TypeDescription.Generic.Visitor.Substitutor.ForAttachment.of(this));
     }
@@ -870,7 +1004,6 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
-    @CachedReturnPlugin.Enhance
     public FieldList<FieldDescription.InDefinedShape> getDeclaredFields() {
         return new FieldList.ForTokens(this, fieldTokens);
     }
@@ -878,7 +1011,6 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
-    @CachedReturnPlugin.Enhance
     public MethodList<MethodDescription.InDefinedShape> getDeclaredMethods() {
         return new MethodList.ForTokens(this, methodTokens);
     }
@@ -886,7 +1018,6 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
-    @CachedReturnPlugin.Enhance
     public TypeList.Generic getTypeVariables() {
         return TypeList.Generic.ForDetachedTypes.attachVariables(this, typeVariables);
     }
@@ -933,8 +1064,25 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
     /**
      * {@inheritDoc}
      */
+    //@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "Assuming super class for given instance.")
     public boolean isRecord() {
-        return record && getSuperClass().asErasure().equals(JavaType.RECORD.getTypeStub());
+        return record
+                && superClass != null
+                && getSuperClass().asErasure().equals(JavaType.RECORD.getTypeStub());
+    }
+
+    @Override
+    public boolean isSealed() {
+        return permittedSubclasses != null;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public TypeList getPermittedSubtypes() {
+        return permittedSubclasses == null
+                ? new TypeList.Empty()
+                : new TypeList.Explicit(permittedSubclasses);
     }
 
     /**
@@ -1043,11 +1191,16 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
         } else if (!nestHost.isSamePackage(this)) {
             throw new IllegalStateException("Cannot define nest host " + nestHost + " + within different package then " + this);
         }
+        for (TypeDescription permittedSubclass : getPermittedSubtypes()) {
+            if (!permittedSubclass.isAssignableTo(this) || permittedSubclass.equals(this)) {
+                throw new IllegalStateException("Cannot assign permitted subclass " + permittedSubclass + " to " + this);
+            }
+        }
         Set<TypeDescription> typeAnnotationTypes = new HashSet<TypeDescription>();
         for (AnnotationDescription annotationDescription : getDeclaredAnnotations()) {
-            if (!annotationDescription.getElementTypes().contains(ElementType.TYPE)
-                    && !(isAnnotation() && annotationDescription.getElementTypes().contains(ElementType.ANNOTATION_TYPE))
-                    && !(isPackageType() && annotationDescription.getElementTypes().contains(ElementType.PACKAGE))) {
+            if (!annotationDescription.isSupportedOn(ElementType.TYPE)
+                    && !(isAnnotation() && annotationDescription.isSupportedOn(ElementType.ANNOTATION_TYPE))
+                    && !(isPackageType() && annotationDescription.isSupportedOn(ElementType.PACKAGE))) {
                 throw new IllegalStateException("Cannot add " + annotationDescription + " on " + this);
             } else if (!typeAnnotationTypes.add(annotationDescription.getAnnotationType())) {
                 throw new IllegalStateException("Duplicate annotation " + annotationDescription + " for " + this);
@@ -1073,7 +1226,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
             }
             Set<TypeDescription> fieldAnnotationTypes = new HashSet<TypeDescription>();
             for (AnnotationDescription annotationDescription : fieldDescription.getDeclaredAnnotations()) {
-                if (!annotationDescription.getElementTypes().contains(ElementType.FIELD)) {
+                if (!annotationDescription.isSupportedOn(ElementType.FIELD)) {
                     throw new IllegalStateException("Cannot add " + annotationDescription + " on " + fieldDescription);
                 } else if (!fieldAnnotationTypes.add(annotationDescription.getAnnotationType())) {
                     throw new IllegalStateException("Duplicate annotation " + annotationDescription + " for " + fieldDescription);
@@ -1086,8 +1239,6 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 throw new IllegalStateException("Duplicate method signature for " + methodDescription);
             } else if ((methodDescription.getModifiers() & ~ModifierContributor.ForMethod.MASK) != 0) {
                 throw new IllegalStateException("Illegal modifiers " + methodDescription.getModifiers() + " for " + methodDescription);
-            } else if (!isAbstract() && methodDescription.isAbstract()) {
-                throw new IllegalStateException("Non-abstract type cannot declare abstract method " + methodDescription);
             } else if (isInterface() && !methodDescription.isPublic() && !methodDescription.isPrivate()) {
                 throw new IllegalStateException("Methods declared by an interface must be public or private " + methodDescription);
             }
@@ -1160,7 +1311,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
                 }
                 Set<TypeDescription> parameterAnnotationTypes = new HashSet<TypeDescription>();
                 for (AnnotationDescription annotationDescription : parameterDescription.getDeclaredAnnotations()) {
-                    if (!annotationDescription.getElementTypes().contains(ElementType.PARAMETER)) {
+                    if (!annotationDescription.isSupportedOn(ElementType.PARAMETER)) {
                         throw new IllegalStateException("Cannot add " + annotationDescription + " on " + parameterDescription);
                     } else if (!parameterAnnotationTypes.add(annotationDescription.getAnnotationType())) {
                         throw new IllegalStateException("Duplicate annotation " + annotationDescription + " of " + parameterDescription + " for " + methodDescription);
@@ -1178,7 +1329,7 @@ public class InstrumentedTypeDefault extends TypeDescription.AbstractBase.OfSimp
             }
             Set<TypeDescription> methodAnnotationTypes = new HashSet<TypeDescription>();
             for (AnnotationDescription annotationDescription : methodDescription.getDeclaredAnnotations()) {
-                if (!annotationDescription.getElementTypes().contains(methodDescription.isMethod() ? ElementType.METHOD : ElementType.CONSTRUCTOR)) {
+                if (!annotationDescription.isSupportedOn(methodDescription.isMethod() ? ElementType.METHOD : ElementType.CONSTRUCTOR)) {
                     throw new IllegalStateException("Cannot add " + annotationDescription + " on " + methodDescription);
                 } else if (!methodAnnotationTypes.add(annotationDescription.getAnnotationType())) {
                     throw new IllegalStateException("Duplicate annotation " + annotationDescription + " for " + methodDescription);
