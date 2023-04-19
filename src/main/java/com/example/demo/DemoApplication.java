@@ -2,20 +2,15 @@ package com.example.demo;
 
 import com.example.demo.test.Foo;
 import net.bytebuddy.ByteBuddy;
-import net.bytebuddy.ClassFileVersion;
 import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
-import net.bytebuddy.description.type.TypeDescription;
-import net.bytebuddy.dynamic.scaffold.InstrumentedTypeFactory;
-import net.bytebuddy.dynamic.scaffold.TypeInitializer;
 import net.bytebuddy.implementation.Implementation;
 import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
-import net.bytebuddy.utility.RandomString;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -27,8 +22,6 @@ import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @SpringBootApplication
 public class DemoApplication {
@@ -107,40 +100,19 @@ public class DemoApplication {
 //                    .installOn(ByteBuddyAgent.install());
 
             // 3. interceptor
-            Map<TypeDescription, ImplementationContextFactory> implementationContextFactoryCache = new ConcurrentHashMap<>();
             ByteBuddy byteBuddy = new ByteBuddy()
-//                    .with(new AuxiliaryType.NamingStrategy() {
-//                        @Override
-//                        public String name(TypeDescription instrumentedType) {
-//                            return instrumentedType.getName() + "$auxiliary$" + RandomString.hashOf(instrumentedType.getCanonicalName().hashCode());
-//                        }
-//                    })
-                    .with(new AuxiliaryType.NamingStrategy.Enumerating("auxiliary"))
-                    .with(new NamingStrategy.AbstractBase() {
-                        @Override
-                        protected String name(TypeDescription superClass) {
-                            return superClass.getName() + "$ByteBuddy$" + RandomString.hashOf(superClass.getCanonicalName().hashCode());
-                        }
-                    })
-                    .with(new Implementation.Context.Factory() {
-                        @Override
-                        public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion) {
-                            return implementationContextFactoryCache.computeIfAbsent(instrumentedType, key ->
-                                    new ImplementationContextFactory(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion, Implementation.Context.FrameGeneration.DISABLED, RandomString.hashOf(instrumentedType.hashCode())));
-                        }
-
-                        @Override
-                        public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion, Implementation.Context.FrameGeneration frameGeneration) {
-                            return implementationContextFactoryCache.computeIfAbsent(instrumentedType, key ->
-                                    new ImplementationContextFactory(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion, frameGeneration, RandomString.hashOf(instrumentedType.hashCode())));
-                        }
-                    })
-                    .with(new InstrumentedTypeFactory())
+                    .with(new AuxiliaryType.NamingStrategy.Suffixing("sw_auxiliary"))
+                    .with(new NamingStrategy.Suffixing("sw_bytebuddy"))
+                    .with(new Implementation.Context.Default.Factory.WithFixedSuffix("sw_synthetic") )
+//                    .with(new ImplementationContextFactory())
+//                    .with(new InstrumentedTypeFactory())
                     ;
 
 
             new AgentBuilder.Default(byteBuddy)
-                    .enableNativeMethodPrefix("_origin$")
+                    .enableNativeMethodPrefix("_sw_origin$")
+                    // avoid duplicate field on re-transform
+                    .with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                     .type(ElementMatchers.named("com.example.demo.test.Foo"))
                     .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
@@ -148,7 +120,7 @@ public class DemoApplication {
                                         .visit(new MyAsmVisitorWrapper())
                                         .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
-                                                .to(new InstMethodsInter(null, classLoader), "delegate$sayHelloFoo"));
+                                                .to(new InstMethodsInter(null, classLoader), "_sw_delegate$sayHelloFoo"));
                             }
                     )
                     .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
@@ -156,7 +128,7 @@ public class DemoApplication {
                                         .visit(new MyAsmVisitorWrapper())
                                         .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
-                                                .to(new InstMethodsInter(null, classLoader), "delegate$doSomething"));
+                                                .to(new InstMethodsInter(null, classLoader), "_sw_delegate$doSomething"));
                             }
                     )
                     .with(new AgentBuilder.Listener.Adapter() {
@@ -166,31 +138,6 @@ public class DemoApplication {
                             throwable.printStackTrace();
                         }
                     })
-//                    .with(new AgentBuilder.TransformerDecorator() {
-//                                public ResettableClassFileTransformer decorate(ResettableClassFileTransformer classFileTransformer) {
-//                                    return new ResettableClassFileTransformer.WithDelegation(classFileTransformer) {
-//                                        @Override
-//                                        public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
-//                                            //transform class
-//                                            byte[] newClassfileBuffer = classFileTransformer.transform(loader, className, classBeingRedefined, protectionDomain, classfileBuffer);
-//                                            if (newClassfileBuffer != null) {
-//                                                classfileBuffer = newClassfileBuffer;
-//                                            }
-//                                            if (!className.startsWith("com/example")) {
-//                                                return classfileBuffer;
-//                                            }
-//                                            // remove duplicated fields
-//                                            ClassReader classReader = new ClassReader(classfileBuffer);
-//                                            ClassWriter classWriter = new ClassWriter(classReader, 0);
-//                                            ClassVisitor classVisitor = new RemoveDuplicatedFieldsClassVisitor(Opcodes.ASM8, classWriter);
-//                                            classReader.accept(classVisitor, 0);
-//                                            classfileBuffer = classWriter.toByteArray();
-//                                            return classfileBuffer;
-//                                        }
-//                                    };
-//                                }
-//                            }
-//                    )
                     .installOn(ByteBuddyAgent.install());
 
             String result = new Foo().sayHelloFoo();

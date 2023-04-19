@@ -24,6 +24,9 @@ public class MyAsmVisitorWrapper implements AsmVisitorWrapper {
 
     @Override
     public ClassVisitor wrap(TypeDescription instrumentedType, ClassVisitor classVisitor, Implementation.Context implementationContext, TypePool typePool, FieldList<FieldDescription.InDefinedShape> fields, MethodList<?> methods, int writerFlags, int readerFlags) {
+        if (classVisitor instanceof RemoveDuplicatedFieldsClassVisitor) {
+            return classVisitor;
+        }
         return new RemoveDuplicatedFieldsClassVisitor(Opcodes.ASM8, classVisitor);
     }
 }

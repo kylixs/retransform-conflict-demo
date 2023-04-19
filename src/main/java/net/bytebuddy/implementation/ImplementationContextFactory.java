@@ -4,24 +4,19 @@ import net.bytebuddy.ClassFileVersion;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.dynamic.scaffold.TypeInitializer;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
+import net.bytebuddy.utility.RandomString;
 
 /**
- * @author gongdewei 2023/4/16
+ * @author gongdewei 2023/4/20
  */
-public class ImplementationContextFactory extends Implementation.Context.Default {
+public class ImplementationContextFactory implements Implementation.Context.Factory {
+    @Override
+    public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion) {
+        return this.make(instrumentedType, auxiliaryTypeNamingStrategy, typeInitializer, classFileVersion, auxiliaryClassFileVersion, Implementation.Context.FrameGeneration.GENERATE);
+    }
 
-    /**
-     * Creates a new default implementation context.
-     *
-     * @param instrumentedType            The description of the type that is currently subject of creation.
-     * @param classFileVersion            The class file version of the created class.
-     * @param auxiliaryTypeNamingStrategy The naming strategy for naming an auxiliary type.
-     * @param typeInitializer             The type initializer of the created instrumented type.
-     * @param auxiliaryClassFileVersion   The class file version to use for auxiliary classes.
-     * @param frameGeneration             Determines the frame generation to be applied.
-     * @param suffix                      The suffix to append to the names of accessor methods.
-     */
-    public ImplementationContextFactory(TypeDescription instrumentedType, ClassFileVersion classFileVersion, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion auxiliaryClassFileVersion, FrameGeneration frameGeneration, String suffix) {
-        super(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion, frameGeneration, suffix);
+    @Override
+    public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion, Implementation.Context.FrameGeneration frameGeneration) {
+        return new Implementation.Context.Default(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion, frameGeneration, RandomString.hashOf(instrumentedType.hashCode()));
     }
 }
