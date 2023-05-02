@@ -6,7 +6,6 @@ import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.implementation.Implementation;
-import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
 import net.bytebuddy.matcher.ElementMatchers;
@@ -80,7 +79,7 @@ public class DemoApplication {
         }
     }
 
-    private static void transformWithByteBuddy() {
+    private static void transformWithByteBuddy() throws Exception {
             // 1. delegate to static method
 //            new AgentBuilder.Default()
 //                    .type(ElementMatchers.named("com.example.demo.test.Foo"))
@@ -109,18 +108,25 @@ public class DemoApplication {
                     ;
 
 
-            new AgentBuilder.Default(byteBuddy)
-                    .enableNativeMethodPrefix("_sw_origin$")
-                    // avoid duplicate field on re-transform
-                    .with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
+        //.enableNativeMethodPrefix("_sw_origin$");
+        AgentBuilder agentBuilder = new AgentBuilder.Default(byteBuddy);
+        NativeMethodStrategyFactory.inject(agentBuilder, AgentBuilder.Default.class);
+
+        // avoid duplicate field on re-transform
+        String className = "com.example.demo.test.Foo";
+        agentBuilder.with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
-                    .type(ElementMatchers.named("com.example.demo.test.Foo"))
+                    .type(ElementMatchers.named(className))
                     .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
+//                                DelegateNamingResolver.reset();
+//                                DelegateNamingResolver delegateNamingResolver = DelegateNamingResolver.get(typeDescription.getTypeName());
+
                                 return builder
                                         .visit(new MyAsmVisitorWrapper())
                                         .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
-                                                .to(new InstMethodsInter(null, classLoader), "_sw_delegate$sayHelloFoo"));
+//                                                .to(new InstMethodsInterceptor(null, classLoader)));
+                                                .to(new InstMethodsInterceptor(null, classLoader), "_sw_delegate$sayHelloFoo"));
                             }
                     )
                     .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
@@ -128,7 +134,8 @@ public class DemoApplication {
                                         .visit(new MyAsmVisitorWrapper())
                                         .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
-                                                .to(new InstMethodsInter(null, classLoader), "_sw_delegate$doSomething"));
+//                                                .to(new InstMethodsInter(null, classLoader)));
+                                                .to(new InstMethodsInterceptor(null, classLoader), "_sw_delegate$doSomething"));
                             }
                     )
                     .with(new AgentBuilder.Listener.Adapter() {
@@ -140,12 +147,20 @@ public class DemoApplication {
                     })
                     .installOn(ByteBuddyAgent.install());
 
-            String result = new Foo().sayHelloFoo();
-            System.out.println("sayHello result: " + result);
+        String result = new Foo().sayHelloFoo("zs");
+        System.out.println("sayHello result: " + result);
 
-            List<String> list = new Foo().doSomething(123);
+        result = new Foo().sayHelloFoo("zs", "ls");
+        System.out.println("sayHello result: " + result);
+
+        result = new Foo().sayHelloFoo(1001);
+        System.out.println("sayHello result: " + result);
+
+        List<String> list = new Foo().doSomething(123);
             System.out.println("doSomething result: " + list);
     }
+
+
 
     private static void reTransform(Instrumentation instrumentation, Class clazz) throws UnmodifiableClassException {
         ClassFileTransformer transformer = new ClassFileTransformer() {
