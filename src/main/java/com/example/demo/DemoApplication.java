@@ -5,7 +5,7 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
-import net.bytebuddy.implementation.Implementation;
+import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
 import net.bytebuddy.matcher.ElementMatchers;
@@ -80,7 +80,9 @@ public class DemoApplication {
     }
 
     private static void transformWithByteBuddy() throws Exception {
-            // 1. delegate to static method
+        String className = "com.example.demo.test.Foo";
+
+        // 1. delegate to static method
 //            new AgentBuilder.Default()
 //                    .type(ElementMatchers.named("com.example.demo.test.Foo"))
 //                    .transform((builder, typeDescription, classLoader, module) -> builder
@@ -98,44 +100,37 @@ public class DemoApplication {
 //                    )
 //                    .installOn(ByteBuddyAgent.install());
 
-            // 3. interceptor
+
+        // AgentBuilder instance 1
+//        installInterecptor1(className);
+
+
+        // 3. interceptor
             ByteBuddy byteBuddy = new ByteBuddy()
                     .with(new AuxiliaryType.NamingStrategy.Suffixing("sw_auxiliary"))
                     .with(new NamingStrategy.Suffixing("sw_bytebuddy"))
-                    .with(new Implementation.Context.Default.Factory.WithFixedSuffix("sw_synthetic") )
-//                    .with(new ImplementationContextFactory())
+                    .with(new ImplementationContextFactory())
 //                    .with(new InstrumentedTypeFactory())
                     ;
 
 
-        //.enableNativeMethodPrefix("_sw_origin$");
         AgentBuilder agentBuilder = new AgentBuilder.Default(byteBuddy);
         NativeMethodStrategyFactory.inject(agentBuilder, AgentBuilder.Default.class);
 
         // avoid duplicate field on re-transform
-        String className = "com.example.demo.test.Foo";
         agentBuilder.with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                     .type(ElementMatchers.named(className))
                     .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
-//                                DelegateNamingResolver.reset();
-//                                DelegateNamingResolver delegateNamingResolver = DelegateNamingResolver.get(typeDescription.getTypeName());
-
                                 return builder
                                         .visit(new MyAsmVisitorWrapper())
                                         .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
 //                                                .to(new InstMethodsInterceptor(null, classLoader)));
-                                                .to(new InstMethodsInterceptor(null, classLoader), "_sw_delegate$sayHelloFoo"));
-                            }
-                    )
-                    .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
-                                return builder
-                                        .visit(new MyAsmVisitorWrapper())
+                                                .to(new InstMethodsInterceptor("sayHelloFooInterceptorClass", classLoader), "_sw_delegate$sayHelloFoo"))
                                         .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
                                         .intercept(MethodDelegation.withDefaultConfiguration()
-//                                                .to(new InstMethodsInter(null, classLoader)));
-                                                .to(new InstMethodsInterceptor(null, classLoader), "_sw_delegate$doSomething"));
+                                                .to(new InstMethodsInterceptor("interceptorClass2", classLoader), "_sw_delegate$doSomething2"));
                             }
                     )
                     .with(new AgentBuilder.Listener.Adapter() {
@@ -146,6 +141,9 @@ public class DemoApplication {
                         }
                     })
                     .installOn(ByteBuddyAgent.install());
+
+        // AgentBuilder instance 3
+//        installInterceptor3(className);
 
         String result = new Foo().sayHelloFoo("zs");
         System.out.println("sayHello result: " + result);
@@ -160,6 +158,56 @@ public class DemoApplication {
             System.out.println("doSomething result: " + list);
     }
 
+    private static void installInterceptor3(String className) {
+        new AgentBuilder.Default()
+                .with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
+                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                .type(ElementMatchers.named(className))
+                .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
+                            return builder
+                                    .visit(new MyAsmVisitorWrapper())
+                                    .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
+                                    .intercept(MethodDelegation.withDefaultConfiguration()
+                                            .to(new InstMethodsInterceptor("interceptorClass3", classLoader), "_sw_delegate$doSomething3"))
+                                    ;
+                        }
+                )
+                .with(new AgentBuilder.Listener.Adapter() {
+                    @Override
+                    public void onError(String typeName, ClassLoader classLoader, JavaModule module, boolean loaded, Throwable throwable) {
+                        System.err.println(String.format("Transform Error: typeName: %s, classLoader: %s, module: %s, loaded: %s", typeName, classLoader, module, loaded));
+                        throwable.printStackTrace();
+                    }
+                })
+                .installOn(ByteBuddyAgent.install());
+    }
+
+    private static void installInterceptor1(String className) {
+        new AgentBuilder.Default()
+                .with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
+                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                .type(ElementMatchers.named(className))
+                .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
+                            return builder
+                                    .visit(new MyAsmVisitorWrapper())
+                                    .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
+                                    .intercept(MethodDelegation.withDefaultConfiguration()
+                                            .to(new InstMethodsInterceptor("interceptorClass1_1", classLoader), "_sw_delegate$doSomething1_1"))
+                                    .method(ElementMatchers.namedOneOf("doSomething"))
+                                    .intercept(MethodDelegation.withDefaultConfiguration()
+                                            .to(new InstMethodsInterceptor("interceptorClass1_2", classLoader), "_sw_delegate$doSomething1_2"))
+                                    ;
+                        }
+                )
+                .with(new AgentBuilder.Listener.Adapter() {
+                    @Override
+                    public void onError(String typeName, ClassLoader classLoader, JavaModule module, boolean loaded, Throwable throwable) {
+                        System.err.println(String.format("Transform Error: typeName: %s, classLoader: %s, module: %s, loaded: %s", typeName, classLoader, module, loaded));
+                        throwable.printStackTrace();
+                    }
+                })
+                .installOn(ByteBuddyAgent.install());
+    }
 
 
     private static void reTransform(Instrumentation instrumentation, Class clazz) throws UnmodifiableClassException {

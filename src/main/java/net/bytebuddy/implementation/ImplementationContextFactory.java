@@ -11,12 +11,19 @@ import net.bytebuddy.utility.RandomString;
  */
 public class ImplementationContextFactory implements Implementation.Context.Factory {
     @Override
-    public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion) {
-        return this.make(instrumentedType, auxiliaryTypeNamingStrategy, typeInitializer, classFileVersion, auxiliaryClassFileVersion, Implementation.Context.FrameGeneration.GENERATE);
+    public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy,
+                                                       TypeInitializer typeInitializer, ClassFileVersion classFileVersion,
+                                                       ClassFileVersion auxiliaryClassFileVersion) {
+        return this.make(instrumentedType, auxiliaryTypeNamingStrategy, typeInitializer, classFileVersion, auxiliaryClassFileVersion,
+                Implementation.Context.FrameGeneration.GENERATE);
     }
 
     @Override
-    public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy, TypeInitializer typeInitializer, ClassFileVersion classFileVersion, ClassFileVersion auxiliaryClassFileVersion, Implementation.Context.FrameGeneration frameGeneration) {
-        return new Implementation.Context.Default(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer, auxiliaryClassFileVersion, frameGeneration, RandomString.hashOf(instrumentedType.hashCode()));
+    public Implementation.Context.ExtractableView make(TypeDescription instrumentedType, AuxiliaryType.NamingStrategy auxiliaryTypeNamingStrategy,
+                                                       TypeInitializer typeInitializer, ClassFileVersion classFileVersion,
+                                                       ClassFileVersion auxiliaryClassFileVersion, Implementation.Context.FrameGeneration frameGeneration) {
+        return new Implementation.Context.Default(instrumentedType, classFileVersion, auxiliaryTypeNamingStrategy, typeInitializer,
+                auxiliaryClassFileVersion, frameGeneration,
+                RandomString.hashOf(instrumentedType.getTypeName().hashCode()));
     }
 }
