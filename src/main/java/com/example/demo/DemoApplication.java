@@ -7,6 +7,7 @@ import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
+import net.bytebuddy.implementation.SuperMethodCall;
 import net.bytebuddy.implementation.auxiliary.AuxiliaryType;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
@@ -22,17 +23,18 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
+
 @SpringBootApplication
 public class DemoApplication {
 
     public static void main(String[] args) throws Exception {
-        SpringApplication.run(DemoApplication.class, args);
         Instrumentation instrumentation = ByteBuddyAgent.install();
-
         String clazzName = "com.example.demo.test.Foo";
-
-        System.out.println("transform with bytebuddy: "+clazzName);
+        System.out.println("transform with bytebuddy: " + clazzName);
         transformWithByteBuddy();
+
+        SpringApplication.run(DemoApplication.class, args);
 
         testRetransformClass(instrumentation, clazzName);
         testRetransformClass(instrumentation, TestController.class);
@@ -44,7 +46,7 @@ public class DemoApplication {
 
     private static void testRetransformClass(Instrumentation instrumentation, Class clazz) throws Exception {
         System.out.println("=========================");
-        System.out.println("before retransform: "+ clazz.getName());
+        System.out.println("before retransform: " + clazz.getName());
 
         List<String> classesBeforeReTransform = findClassesStartsWith(instrumentation, clazz.getName());
         printStrings(classesBeforeReTransform);
@@ -57,7 +59,7 @@ public class DemoApplication {
         reTransform(instrumentation, clazz);
         System.out.println();
 
-        System.out.println("after retransform: "+ clazz);
+        System.out.println("after retransform: " + clazz);
         List<String> classesAfterReTransform = findClassesStartsWith(instrumentation, clazz.getName());
         printStrings(classesAfterReTransform);
         System.out.println();
@@ -91,7 +93,7 @@ public class DemoApplication {
 //                    )
 //                    .installOn(ByteBuddyAgent.install());
 
-            // 2. advice
+        // 2. advice
 //            new AgentBuilder.Default()
 //                    .type(ElementMatchers.named("com.example.demo.test.Foo"))
 //                    .transform((builder, typeDescription, classLoader, module) -> builder
@@ -106,44 +108,72 @@ public class DemoApplication {
 
 
         // 3. interceptor
-            ByteBuddy byteBuddy = new ByteBuddy()
-                    .with(new AuxiliaryType.NamingStrategy.Suffixing("sw_auxiliary"))
-                    .with(new NamingStrategy.Suffixing("sw_bytebuddy"))
-                    .with(new ImplementationContextFactory())
+        ByteBuddy byteBuddy = new ByteBuddy()
+                //.with(TypeValidation.DISABLED)
+                .with(new AuxiliaryType.NamingStrategy.Suffixing("sw_auxiliary"))
+                .with(new NamingStrategy.Suffixing("sw_bytebuddy"))
+                .with(new ImplementationContextFactory())
 //                    .with(new InstrumentedTypeFactory())
-                    ;
+                ;
 
 
         AgentBuilder agentBuilder = new AgentBuilder.Default(byteBuddy);
         NativeMethodStrategyFactory.inject(agentBuilder, AgentBuilder.Default.class);
 
         // avoid duplicate field on re-transform
+        Instrumentation instrumentation = ByteBuddyAgent.install();
         agentBuilder.with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
-                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
-                    .type(ElementMatchers.named(className))
-                    .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
-                                return builder
-                                        .visit(new MyAsmVisitorWrapper())
-                                        .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
-                                        .intercept(MethodDelegation.withDefaultConfiguration()
-//                                                .to(new InstMethodsInterceptor(null, classLoader)));
-                                                .to(new InstMethodsInterceptor("sayHelloFooInterceptorClass", classLoader), "_sw_delegate$sayHelloFoo"))
-                                        .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
-                                        .intercept(MethodDelegation.withDefaultConfiguration()
-                                                .to(new InstMethodsInterceptor("interceptorClass2", classLoader), "_sw_delegate$doSomething2"));
-                            }
-                    )
-                    .with(new AgentBuilder.Listener.Adapter() {
-                        @Override
-                        public void onError(String typeName, ClassLoader classLoader, JavaModule module, boolean loaded, Throwable throwable) {
-                            System.err.println(String.format("Transform Error: typeName: %s, classLoader: %s, module: %s, loaded: %s", typeName, classLoader, module, loaded));
-                            throwable.printStackTrace();
+                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+//                .with(ClassFileLocator.ForInstrumentation.fromInstalledAgent(DemoApplication.class.getClassLoader()))
+//                .with(SWClassFileLocatorForInstrumentation.fromInstalledAgent(DemoApplication.class.getClassLoader()))
+                .ignore(nameStartsWith("net.bytebuddy.")
+                        .or(nameStartsWith("org.apache.skywalking.")))
+                .type(ElementMatchers.named(className))
+                .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
+                            return builder
+                                    .visit(new MyAsmVisitorWrapper())
+                                    // constructor
+                                    .constructor(ElementMatchers.any())
+                                    .intercept(SuperMethodCall.INSTANCE.andThen(
+                                            MethodDelegation.withDefaultConfiguration().to(
+                                                    new ConstructorInter("FooConstructorInterceptorClass", classLoader),
+                                                    "_sw_delegate$constructor")
+                                    ))
+                                    // sayHelloFoo method
+                                    .method(ElementMatchers.nameContainsIgnoreCase("sayHelloFoo"))
+                                    .intercept(MethodDelegation.withDefaultConfiguration()
+                                            .to(new InstMethodsInterceptor("sayHelloFooInterceptorClass", classLoader), "_sw_delegate$sayHelloFoo"))
+                                    // doSomething method
+                                    .method(ElementMatchers.nameContainsIgnoreCase("doSomething"))
+                                    .intercept(MethodDelegation.withDefaultConfiguration()
+                                            .to(new InstMethodsInterceptor("interceptorClass2", classLoader), "_sw_delegate$doSomething2"));
                         }
-                    })
-                    .installOn(ByteBuddyAgent.install());
+                )
+                .type(ElementMatchers.named("com.example.demo.TestController"))
+                .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
+                    return builder
+                            .visit(new MyAsmVisitorWrapper())
+                            .constructor(ElementMatchers.any())
+                            .intercept(SuperMethodCall.INSTANCE.andThen(
+                                    MethodDelegation.withDefaultConfiguration().to(
+                                            new ConstructorInter("TestControllerConstructorInterceptorClass", classLoader),
+                                            "_sw_delegate$constructor")
+                            ))
+                            .method(ElementMatchers.namedOneOf("test", "testJdkHttpClient"))
+                            .intercept(MethodDelegation.withDefaultConfiguration()
+                                    .to(new InstMethodsInterceptor("TestControllerInterceptorClass", classLoader), "_sw_delegate$RequestMapping"));
+                })
+                .with(new AgentBuilder.Listener.Adapter() {
+                    @Override
+                    public void onError(String typeName, ClassLoader classLoader, JavaModule module, boolean loaded, Throwable throwable) {
+                        System.err.println(String.format("Transform Error: typeName: %s, classLoader: %s, module: %s, loaded: %s", typeName, classLoader, module, loaded));
+                        throwable.printStackTrace();
+                    }
+                })
+                .installOn(instrumentation);
 
         // AgentBuilder instance 3
-//        installInterceptor3(className);
+        installInterceptor3(className);
 
         String result = new Foo().sayHelloFoo("zs");
         System.out.println("sayHello result: " + result);
@@ -155,7 +185,7 @@ public class DemoApplication {
         System.out.println("sayHello result: " + result);
 
         List<String> list = new Foo().doSomething(123);
-            System.out.println("doSomething result: " + list);
+        System.out.println("doSomething result: " + list);
     }
 
     private static void installInterceptor3(String className) {
@@ -172,6 +202,20 @@ public class DemoApplication {
                                     ;
                         }
                 )
+                .type(ElementMatchers.named("com.example.demo.TestController"))
+                .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
+                    return builder
+                            .visit(new MyAsmVisitorWrapper())
+//                            .constructor(ElementMatchers.any())
+//                            .intercept(SuperMethodCall.INSTANCE.andThen(
+//                                    MethodDelegation.withDefaultConfiguration().to(
+//                                            new ConstructorInter("TestControllerConstructorInterceptorClass2", classLoader),
+//                                            "_sw_delegate$constructor2")
+//                            ))
+                            .method(ElementMatchers.namedOneOf("test", "testJdkHttpClient"))
+                            .intercept(MethodDelegation.withDefaultConfiguration()
+                                    .to(new InstMethodsInterceptor("TestControllerInterceptorClass2", classLoader), "_sw_delegate$RequestMapping2"));
+                })
                 .with(new AgentBuilder.Listener.Adapter() {
                     @Override
                     public void onError(String typeName, ClassLoader classLoader, JavaModule module, boolean loaded, Throwable throwable) {
@@ -215,8 +259,8 @@ public class DemoApplication {
             @Override
             public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                     ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
-//				System.out.println(String.format("className=%s, classBeingRedefined=%s, classloader=%s, protectionDomain=%s, classfileBuffer=%d",
-//						className, classBeingRedefined, loader, protectionDomain.getCodeSource(), classfileBuffer.length));
+                System.out.println(String.format("transform: className=%s, classBeingRedefined=%s, classloader=%s, protectionDomain=%s, classfileBuffer=%d",
+                        className, classBeingRedefined, loader, protectionDomain.getCodeSource(), classfileBuffer.length));
                 return null;
             }
         };
