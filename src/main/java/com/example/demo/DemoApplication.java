@@ -5,6 +5,7 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.dynamic.ClassFileLocator;
 import net.bytebuddy.implementation.ImplementationContextFactory;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.SuperMethodCall;
@@ -122,9 +123,10 @@ public class DemoApplication {
 
         // avoid duplicate field on re-transform
         Instrumentation instrumentation = ByteBuddyAgent.install();
-        agentBuilder.with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
+        agentBuilder
+                .with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
                 .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
-//                .with(ClassFileLocator.ForInstrumentation.fromInstalledAgent(DemoApplication.class.getClassLoader()))
+                .with(ClassFileLocator.ForInstrumentation.fromInstalledAgent(DemoApplication.class.getClassLoader()))
 //                .with(SWClassFileLocatorForInstrumentation.fromInstalledAgent(DemoApplication.class.getClassLoader()))
                 .ignore(nameStartsWith("net.bytebuddy.")
                         .or(nameStartsWith("org.apache.skywalking.")))
@@ -192,6 +194,7 @@ public class DemoApplication {
         new AgentBuilder.Default()
                 .with(AgentBuilder.DescriptionStrategy.Default.POOL_FIRST)
                 .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                .with(ClassFileLocator.ForInstrumentation.fromInstalledAgent(DemoApplication.class.getClassLoader()))
                 .type(ElementMatchers.named(className))
                 .transform((builder, typeDescription, classLoader, module, protectionDomain) -> {
                             return builder
